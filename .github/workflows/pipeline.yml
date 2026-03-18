@@ -58,6 +58,7 @@ jobs:
     uses: ./.github/workflows/appsec.yml
     with:
       run_dependency_review: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+      run_codeql: ${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 'true' || 'false' }}
       run_dast: ${{ github.event.inputs.run_dast || 'false' }}
       target_url: ${{ github.event.inputs.target_url || '' }}
 
