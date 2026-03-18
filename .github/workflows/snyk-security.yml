@@ -1,7 +1,10 @@
 name: Snyk Security
 
 on:
-  workflow_dispatch:
+  workflow_call:
+    secrets:
+      SNYK_TOKEN:
+        required: false
 
 permissions:
   contents: read

@@ -106,6 +106,12 @@ jobs:
       run_dast: ${{ github.event.inputs.run_dast || 'false' }}
       target_url: ${{ github.event.inputs.target_url || '' }}
 
+  snyk:
+    needs: build
+    uses: ./.github/workflows/snyk-security.yml
+    secrets:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
   docker-push:
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     needs:
@@ -114,6 +120,7 @@ jobs:
       - trivy-fs
       - codeql
       - appsec
+      - snyk
     uses: ./.github/workflows/docker-push.yml
     with:
       image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
