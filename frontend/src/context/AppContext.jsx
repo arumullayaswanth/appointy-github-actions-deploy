@@ -9,20 +9,41 @@ const AppContextProvider = (props) => {
     const backendUrl = (import.meta.env.VITE_BACKEND_URL || '').trim()
 
     const [doctors, setDoctors] = useState([])
+    const [doctorsLoading, setDoctorsLoading] = useState(true)
+    const [doctorsError, setDoctorsError] = useState('')
     const [token, setToken] = useState(localStorage.getItem('token') || '')
     const [userData, setUserData] = useState(false)
 
-    const getDoctorsData = async () => {
+    const getDoctorsData = async (attempt = 1) => {
         try {
+            if (attempt === 1) {
+                setDoctorsLoading(true)
+                setDoctorsError('')
+            }
+
             const { data } = await axios.get(backendUrl + '/api/doctor/list')
             if (data.success) {
                 setDoctors(data.doctors)
+                setDoctorsError('')
             } else {
+                setDoctorsError(data.message || 'Unable to load doctors right now.')
                 toast.error(data.message)
             }
         } catch (error) {
             console.log(error)
+            if (attempt < 3) {
+                setTimeout(() => {
+                    getDoctorsData(attempt + 1)
+                }, attempt * 1500)
+                return
+            }
+
+            setDoctorsError('Unable to load doctors right now. Please refresh in a moment.')
             toast.error(error.message)
+        } finally {
+            if (attempt === 1 || attempt >= 3) {
+                setDoctorsLoading(false)
+            }
         }
     }
 
@@ -60,7 +81,7 @@ const AppContextProvider = (props) => {
     }, [token])
 
     const value = {
-        doctors, getDoctorsData,
+        doctors, getDoctorsData, doctorsLoading, doctorsError,
         currencySymbol,
         backendUrl,
         token, setToken,
