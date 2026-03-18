@@ -137,6 +137,31 @@ jobs:
           kubectl port-forward svc/frontend-service 8080:80 -n appointy > frontend-port-forward.log 2>&1 &
           kubectl port-forward svc/admin-service 8081:80 -n appointy > admin-port-forward.log 2>&1 &
 
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080 >/dev/null 2>&1 && curl -fsS http://127.0.0.1:8081 >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+
+          FRONTEND_HTML=$(curl -fsS http://127.0.0.1:8080 || true)
+          ADMIN_HTML=$(curl -fsS http://127.0.0.1:8081 || true)
+
+          if ! printf '%s' "$FRONTEND_HTML" | grep -qi 'appointy'; then
+            echo "Frontend service did not return the expected app."
+            cat frontend-port-forward.log || true
+            exit 1
+          fi
+
+          if ! printf '%s' "$ADMIN_HTML" | grep -Eqi 'login|admin'; then
+            echo "Admin service did not return the expected admin app."
+            echo "Admin HTML snippet:"
+            printf '%s' "$ADMIN_HTML" | head -c 500 || true
+            echo
+            cat admin-port-forward.log || true
+            exit 1
+          fi
+
           nohup cloudflared tunnel --url http://127.0.0.1:8080 --no-autoupdate > frontend-tunnel.log 2>&1 &
           nohup cloudflared tunnel --url http://127.0.0.1:8081 --no-autoupdate > admin-tunnel.log 2>&1 &
 
