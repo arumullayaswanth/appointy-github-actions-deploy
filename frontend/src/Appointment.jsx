@@ -85,6 +85,11 @@ const Appointment = () => {
       return navigate('/login')
     }
 
+    if (!docSlots[slotIndex]?.length || !slotTime) {
+      toast.warning('Please select an available time slot')
+      return
+    }
+
     const date = docSlots[slotIndex][0].datetime
   
     let day = date.getDate()
@@ -153,7 +158,7 @@ const Appointment = () => {
 
         {/* Booking Slots */}
         <div className='sm:ml-72 sm:pl-4 mt-8 font-medium text-[#565656]'>
-          <p>Booking slots</p>
+            <p>Booking slots</p>
 
           {/* Days Scroll */}
           <div className='flex gap-3 items-center w-full overflow-x-scroll mt-4'>
@@ -192,7 +197,8 @@ const Appointment = () => {
           {/* Book Button */}
           <button
             onClick={bookAppointment}
-            className='bg-primary text-white text-sm font-light px-20 py-3 rounded-full my-6'
+            disabled={!docSlots[slotIndex]?.length}
+            className='bg-primary text-white text-sm font-light px-20 py-3 rounded-full my-6 disabled:cursor-not-allowed disabled:bg-gray-400'
           >
             Book an appointment
           </button>

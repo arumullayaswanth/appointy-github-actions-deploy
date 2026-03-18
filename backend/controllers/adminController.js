@@ -5,6 +5,7 @@ import bcrypt from "bcrypt";
 import validator from "validator";
 import { v2 as cloudinary } from "cloudinary";
 import userModel from "../models/userModel.js"
+import { doctorPlaceholderImage, isCloudinaryConfigured } from "../utils/imageFallback.js";
 
 // API for admin login
 const loginAdmin = async (req, res) => {
@@ -47,8 +48,12 @@ const addDoctor = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    const imageUpload = await cloudinary.uploader.upload(imageFile.path, { resource_type: "image" });
-    const imageUrl = imageUpload.secure_url;
+    let imageUrl = doctorPlaceholderImage
+
+    if (imageFile && isCloudinaryConfigured()) {
+      const imageUpload = await cloudinary.uploader.upload(imageFile.path, { resource_type: "image" });
+      imageUrl = imageUpload.secure_url;
+    }
 
     const doctorData = {
       name,

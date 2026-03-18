@@ -1,0 +1,94 @@
+name: Kubernetes Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Docker image tag to deploy
+        required: false
+        default: latest
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-to-minikube:
+    runs-on: self-hosted
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      IMAGE_TAG: ${{ github.event.inputs.image_tag || 'latest' }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      CLOUDINARY_NAME: ${{ secrets.CLOUDINARY_NAME }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+      CLOUDINARY_SECRET_KEY: ${{ secrets.CLOUDINARY_SECRET_KEY }}
+      RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
+      RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Minikube is running
+        shell: pwsh
+        run: minikube status
+
+      - name: Create rendered manifest directory
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path rendered-k8s | Out-Null
+
+      - name: Render Kubernetes manifests
+        shell: pwsh
+        run: |
+          $files = @("backend.yaml", "frontend.yaml", "admin.yaml")
+          foreach ($file in $files) {
+            $content = Get-Content "k8s/$file" -Raw
+            $content = $content.Replace('${DOCKERHUB_USERNAME}', $env:DOCKERHUB_USERNAME)
+            $content = $content.Replace('${IMAGE_TAG}', $env:IMAGE_TAG)
+            Set-Content "rendered-k8s/$file" $content
+          }
+
+      - name: Apply namespace and configmap
+        shell: pwsh
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/backend-configmap.yaml
+          kubectl apply -f k8s/mongodb.yaml
+
+      - name: Create or update backend secret
+        shell: pwsh
+        run: |
+          kubectl create secret generic appointy-backend-secrets `
+            --namespace appointy `
+            --from-literal=JWT_SECRET="$env:JWT_SECRET" `
+            --from-literal=ADMIN_EMAIL="$env:ADMIN_EMAIL" `
+            --from-literal=ADMIN_PASSWORD="$env:ADMIN_PASSWORD" `
+            --from-literal=CLOUDINARY_NAME="$env:CLOUDINARY_NAME" `
+            --from-literal=CLOUDINARY_API_KEY="$env:CLOUDINARY_API_KEY" `
+            --from-literal=CLOUDINARY_SECRET_KEY="$env:CLOUDINARY_SECRET_KEY" `
+            --from-literal=RAZORPAY_KEY_ID="$env:RAZORPAY_KEY_ID" `
+            --from-literal=RAZORPAY_KEY_SECRET="$env:RAZORPAY_KEY_SECRET" `
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy workloads
+        shell: pwsh
+        run: |
+          kubectl apply -f rendered-k8s/backend.yaml
+          kubectl apply -f rendered-k8s/frontend.yaml
+          kubectl apply -f rendered-k8s/admin.yaml
+
+      - name: Wait for rollouts
+        shell: pwsh
+        run: |
+          kubectl rollout status deployment/mongodb -n appointy --timeout=180s
+          kubectl rollout status deployment/backend -n appointy --timeout=180s
+          kubectl rollout status deployment/frontend -n appointy --timeout=180s
+          kubectl rollout status deployment/admin -n appointy --timeout=180s
+
+      - name: Show service URLs
+        shell: pwsh
+        run: |
+          Write-Host "Frontend URL:"
+          minikube service frontend-service -n appointy --url
+          Write-Host "Admin URL:"
+          minikube service admin-service -n appointy --url
