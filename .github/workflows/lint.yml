@@ -1,13 +1,7 @@
 name: Lint
 
 on:
-  push:
-    branches:
-      - master
-      - main
-      - develop
-  pull_request:
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

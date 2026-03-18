@@ -1,12 +1,31 @@
 name: Kubernetes Deploy
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       image_tag:
-        description: Docker image tag to deploy
         required: false
+        type: string
         default: latest
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      JWT_SECRET:
+        required: true
+      ADMIN_EMAIL:
+        required: true
+      ADMIN_PASSWORD:
+        required: true
+      CLOUDINARY_NAME:
+        required: false
+      CLOUDINARY_API_KEY:
+        required: false
+      CLOUDINARY_SECRET_KEY:
+        required: false
+      RAZORPAY_KEY_ID:
+        required: false
+      RAZORPAY_KEY_SECRET:
+        required: false
 
 permissions:
   contents: read
@@ -16,7 +35,7 @@ jobs:
     runs-on: self-hosted
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      IMAGE_TAG: ${{ github.event.inputs.image_tag || 'latest' }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
       ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}

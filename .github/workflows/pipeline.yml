@@ -1,0 +1,91 @@
+name: CI-CD Pipeline
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Docker image tag for push/deploy
+        required: false
+        default: latest
+      run_deploy:
+        description: Run Kubernetes deploy after Docker push
+        required: false
+        default: "false"
+      run_dast:
+        description: Run DAST scan
+        required: false
+        default: "false"
+      target_url:
+        description: Target URL for DAST scan
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  test:
+    needs: lint
+    uses: ./.github/workflows/test.yml
+
+  build:
+    needs: test
+    uses: ./.github/workflows/build.yml
+
+  sonar:
+    needs: build
+    uses: ./.github/workflows/sonarqube.yml
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  trivy:
+    needs: build
+    uses: ./.github/workflows/trivy.yml
+
+  appsec:
+    needs: build
+    uses: ./.github/workflows/appsec.yml
+    with:
+      run_dast: ${{ github.event.inputs.run_dast || 'false' }}
+      target_url: ${{ github.event.inputs.target_url || '' }}
+
+  docker-push:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs:
+      - sonar
+      - trivy
+      - appsec
+    uses: ./.github/workflows/docker-push.yml
+    with:
+      image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  k8s-deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true' }}
+    needs: docker-push
+    uses: ./.github/workflows/k8s-deploy.yml
+    with:
+      image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      CLOUDINARY_NAME: ${{ secrets.CLOUDINARY_NAME }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+      CLOUDINARY_SECRET_KEY: ${{ secrets.CLOUDINARY_SECRET_KEY }}
+      RAZORPAY_KEY_ID: ${{ secrets.RAZORPAY_KEY_ID }}
+      RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
