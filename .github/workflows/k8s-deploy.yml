@@ -7,6 +7,10 @@ on:
         required: false
         type: string
         default: latest
+      demo_minutes:
+        required: false
+        type: string
+        default: "30"
     secrets:
       DOCKERHUB_USERNAME:
         required: true
@@ -32,10 +36,11 @@ permissions:
 
 jobs:
   deploy-to-minikube:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       IMAGE_TAG: ${{ inputs.image_tag }}
+      DEMO_MINUTES: ${{ inputs.demo_minutes }}
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
       ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
@@ -46,68 +51,131 @@ jobs:
       RAZORPAY_KEY_SECRET: ${{ secrets.RAZORPAY_KEY_SECRET }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Verify Minikube is running
-        shell: pwsh
-        run: minikube status
+      - name: Install kubectl
+        shell: bash
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          kubectl version --client
+
+      - name: Install Minikube
+        shell: bash
+        run: |
+          curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+          chmod +x minikube
+          sudo mv minikube /usr/local/bin/
+          minikube version
+
+      - name: Start Minikube
+        shell: bash
+        run: |
+          minikube start --driver=docker --cpus=2 --memory=4096
+          minikube status
 
       - name: Create rendered manifest directory
-        shell: pwsh
-        run: New-Item -ItemType Directory -Force -Path rendered-k8s | Out-Null
+        shell: bash
+        run: mkdir -p rendered-k8s
 
       - name: Render Kubernetes manifests
-        shell: pwsh
+        shell: bash
         run: |
-          $files = @("backend.yaml", "frontend.yaml", "admin.yaml")
-          foreach ($file in $files) {
-            $content = Get-Content "k8s/$file" -Raw
-            $content = $content.Replace('${DOCKERHUB_USERNAME}', $env:DOCKERHUB_USERNAME)
-            $content = $content.Replace('${IMAGE_TAG}', $env:IMAGE_TAG)
-            Set-Content "rendered-k8s/$file" $content
-          }
+          for file in backend.yaml frontend.yaml admin.yaml; do
+            sed "s|\${DOCKERHUB_USERNAME}|$DOCKERHUB_USERNAME|g; s|\${IMAGE_TAG}|$IMAGE_TAG|g" "k8s/$file" > "rendered-k8s/$file"
+          done
 
       - name: Apply namespace and configmap
-        shell: pwsh
+        shell: bash
         run: |
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/backend-configmap.yaml
           kubectl apply -f k8s/mongodb.yaml
 
       - name: Create or update backend secret
-        shell: pwsh
+        shell: bash
         run: |
-          kubectl create secret generic appointy-backend-secrets `
-            --namespace appointy `
-            --from-literal=JWT_SECRET="$env:JWT_SECRET" `
-            --from-literal=ADMIN_EMAIL="$env:ADMIN_EMAIL" `
-            --from-literal=ADMIN_PASSWORD="$env:ADMIN_PASSWORD" `
-            --from-literal=CLOUDINARY_NAME="$env:CLOUDINARY_NAME" `
-            --from-literal=CLOUDINARY_API_KEY="$env:CLOUDINARY_API_KEY" `
-            --from-literal=CLOUDINARY_SECRET_KEY="$env:CLOUDINARY_SECRET_KEY" `
-            --from-literal=RAZORPAY_KEY_ID="$env:RAZORPAY_KEY_ID" `
-            --from-literal=RAZORPAY_KEY_SECRET="$env:RAZORPAY_KEY_SECRET" `
+          kubectl create secret generic appointy-backend-secrets \
+            --namespace appointy \
+            --from-literal=JWT_SECRET="$JWT_SECRET" \
+            --from-literal=ADMIN_EMAIL="$ADMIN_EMAIL" \
+            --from-literal=ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+            --from-literal=CLOUDINARY_NAME="$CLOUDINARY_NAME" \
+            --from-literal=CLOUDINARY_API_KEY="$CLOUDINARY_API_KEY" \
+            --from-literal=CLOUDINARY_SECRET_KEY="$CLOUDINARY_SECRET_KEY" \
+            --from-literal=RAZORPAY_KEY_ID="$RAZORPAY_KEY_ID" \
+            --from-literal=RAZORPAY_KEY_SECRET="$RAZORPAY_KEY_SECRET" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy workloads
-        shell: pwsh
+        shell: bash
         run: |
           kubectl apply -f rendered-k8s/backend.yaml
           kubectl apply -f rendered-k8s/frontend.yaml
           kubectl apply -f rendered-k8s/admin.yaml
 
       - name: Wait for rollouts
-        shell: pwsh
+        shell: bash
         run: |
           kubectl rollout status deployment/mongodb -n appointy --timeout=180s
           kubectl rollout status deployment/backend -n appointy --timeout=180s
           kubectl rollout status deployment/frontend -n appointy --timeout=180s
           kubectl rollout status deployment/admin -n appointy --timeout=180s
 
-      - name: Show service URLs
-        shell: pwsh
+      - name: Install cloudflared
+        shell: bash
         run: |
-          Write-Host "Frontend URL:"
-          minikube service frontend-service -n appointy --url
-          Write-Host "Admin URL:"
-          minikube service admin-service -n appointy --url
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          cloudflared --version
+
+      - name: Create temporary demo URLs
+        id: demo_urls
+        shell: bash
+        run: |
+          kubectl port-forward svc/frontend-service 8080:80 -n appointy > frontend-port-forward.log 2>&1 &
+          kubectl port-forward svc/admin-service 8081:80 -n appointy > admin-port-forward.log 2>&1 &
+
+          nohup cloudflared tunnel --url http://127.0.0.1:8080 --no-autoupdate > frontend-tunnel.log 2>&1 &
+          nohup cloudflared tunnel --url http://127.0.0.1:8081 --no-autoupdate > admin-tunnel.log 2>&1 &
+
+          for i in $(seq 1 60); do
+            FRONTEND_URL=$(grep -o 'https://[-0-9a-z]*\.trycloudflare\.com' frontend-tunnel.log | head -n 1 || true)
+            ADMIN_URL=$(grep -o 'https://[-0-9a-z]*\.trycloudflare\.com' admin-tunnel.log | head -n 1 || true)
+
+            if [ -n "$FRONTEND_URL" ] && [ -n "$ADMIN_URL" ]; then
+              break
+            fi
+
+            sleep 2
+          done
+
+          if [ -z "$FRONTEND_URL" ] || [ -z "$ADMIN_URL" ]; then
+            echo "Could not create temporary public URLs."
+            echo "Frontend tunnel log:"
+            cat frontend-tunnel.log || true
+            echo "Admin tunnel log:"
+            cat admin-tunnel.log || true
+            exit 1
+          fi
+
+          echo "frontend_url=$FRONTEND_URL" >> "$GITHUB_OUTPUT"
+          echo "admin_url=$ADMIN_URL" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Temporary Demo URLs"
+            echo ""
+            echo "- Frontend: $FRONTEND_URL"
+            echo "- Admin: $ADMIN_URL"
+            echo ""
+            echo "These links stay alive only while this job is running."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep demo alive
+        shell: bash
+        run: |
+          echo "Frontend URL: ${{ steps.demo_urls.outputs.frontend_url }}"
+          echo "Admin URL: ${{ steps.demo_urls.outputs.admin_url }}"
+          echo "Keeping the demo alive for $DEMO_MINUTES minute(s)..."
+          sleep $((DEMO_MINUTES * 60))

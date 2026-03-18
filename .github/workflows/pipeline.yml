@@ -17,6 +17,10 @@ on:
         description: Run Kubernetes deploy after Docker push
         required: false
         default: "false"
+      demo_minutes:
+        description: Minutes to keep temporary demo URLs alive
+        required: false
+        default: "30"
       run_dast:
         description: Run DAST scan
         required: false
@@ -54,12 +58,51 @@ jobs:
     needs: build
     uses: ./.github/workflows/trivy.yml
 
+  trivy-fs:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: HIGH,CRITICAL
+
+      - name: Upload filesystem scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+
+  codeql:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+
   appsec:
     needs: build
     uses: ./.github/workflows/appsec.yml
     with:
       run_dependency_review: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
-      run_codeql: ${{ (github.event_name == 'push' || github.event_name == 'pull_request') && 'true' || 'false' }}
       run_dast: ${{ github.event.inputs.run_dast || 'false' }}
       target_url: ${{ github.event.inputs.target_url || '' }}
 
@@ -68,6 +111,8 @@ jobs:
     needs:
       - sonar
       - trivy
+      - trivy-fs
+      - codeql
       - appsec
     uses: ./.github/workflows/docker-push.yml
     with:
@@ -77,11 +122,12 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   k8s-deploy:
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true' }}
     needs: docker-push
     uses: ./.github/workflows/k8s-deploy.yml
     with:
       image_tag: ${{ github.event.inputs.image_tag || 'latest' }}
+      demo_minutes: ${{ github.event.inputs.demo_minutes || '30' }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
