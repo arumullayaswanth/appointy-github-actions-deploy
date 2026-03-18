@@ -57,11 +57,12 @@ jobs:
     needs: build
     uses: ./.github/workflows/appsec.yml
     with:
+      run_dependency_review: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
       run_dast: ${{ github.event.inputs.run_dast || 'false' }}
       target_url: ${{ github.event.inputs.target_url || '' }}
 
   docker-push:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     needs:
       - sonar
       - trivy
@@ -74,7 +75,7 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   k8s-deploy:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true' }}
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_deploy == 'true') }}
     needs: docker-push
     uses: ./.github/workflows/k8s-deploy.yml
     with:

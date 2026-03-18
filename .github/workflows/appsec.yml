@@ -3,6 +3,10 @@ name: AppSec
 on:
   workflow_call:
     inputs:
+      run_dependency_review:
+        required: false
+        type: string
+        default: "false"
       run_dast:
         required: false
         type: string
@@ -18,7 +22,7 @@ permissions:
 
 jobs:
   dependency-review:
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ inputs.run_dependency_review == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Dependency review
