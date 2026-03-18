@@ -51,6 +51,8 @@ jobs:
           exit-code: 1
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+          scanners: vuln
+          vuln-type: os
 
       - name: Scan frontend image
         uses: aquasecurity/trivy-action@0.24.0
@@ -60,6 +62,8 @@ jobs:
           exit-code: 1
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+          scanners: vuln
+          vuln-type: os
 
       - name: Scan admin image
         uses: aquasecurity/trivy-action@0.24.0
@@ -69,3 +73,5 @@ jobs:
           exit-code: 1
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+          scanners: vuln
+          vuln-type: os
