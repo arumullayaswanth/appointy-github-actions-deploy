@@ -66,6 +66,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run OWASP ZAP baseline scan
-        uses: zaproxy/action-baseline@v0.14.0
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           target: ${{ inputs.target_url }}
